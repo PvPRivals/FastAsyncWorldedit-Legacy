@@ -34,6 +34,7 @@ public class NMSRelighter implements Relighter {
     private final Map<Long, long[][][] /* z y x */ > lightQueue;
     private final AtomicBoolean lightLock = new AtomicBoolean(false);
     private final ConcurrentHashMap<Long, long[][][]> concurrentLightQueue;
+    private final AtomicBoolean scheduledRelight = new AtomicBoolean(false);
 
     private final int maxY;
     private volatile boolean relighting = false;
@@ -41,6 +42,7 @@ public class NMSRelighter implements Relighter {
     public final IntegerTrio mutableBlockPos = new IntegerTrio();
 
     private static final int DISPATCH_SIZE = 64;
+    private static final int SPIGOT_HOOK_DISPATCH_SIZE = 16;
     private boolean removeFirst;
 
     public NMSRelighter(NMSMappedFaweQueue queue) {
@@ -280,6 +282,11 @@ public class NMSRelighter implements Relighter {
     public void fixLightingSafe(boolean sky) {
         if (isEmpty()) return;
         try {
+            if (RivalsLightEngine.isAvailable()) {
+                fixLightingWithSpigotHook();
+                sendChunks();
+                return;
+            }
             if (sky) {
                 fixSkyLighting();
             } else {
@@ -300,6 +307,53 @@ public class NMSRelighter implements Relighter {
         } catch (Throwable e) {
             e.printStackTrace();
         }
+    }
+
+    private synchronized void fixLightingWithSpigotHook() {
+        Map<Long, RelightSkyEntry> map = getSkyMap();
+        Iterator<Map.Entry<Long, RelightSkyEntry>> iter = map.entrySet().iterator();
+        int size = SPIGOT_HOOK_DISPATCH_SIZE;
+        while (iter.hasNext() && size-- > 0) {
+            Map.Entry<Long, RelightSkyEntry> entry = iter.next();
+            RelightSkyEntry chunk = entry.getValue();
+            relightWithSpigotHook(chunk);
+            chunksToSend.put(entry.getKey(), chunk.bitmask);
+            iter.remove();
+        }
+        if (map.isEmpty()) {
+            clearBlockLightQueues();
+        }
+    }
+
+    private void clearBlockLightQueues() {
+        synchronized (lightQueue) {
+            while (!lightLock.compareAndSet(false, true));
+            try {
+                lightQueue.clear();
+            } finally {
+                lightLock.set(false);
+            }
+        }
+        concurrentLightQueue.clear();
+    }
+
+    public void fixLightingLater(final boolean sky) {
+        if (!RivalsLightEngine.isAvailable() || !scheduledRelight.compareAndSet(false, true)) {
+            return;
+        }
+        TaskManager.IMP.later(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    fixLightingSafe(sky);
+                } finally {
+                    scheduledRelight.set(false);
+                }
+                if (!isEmpty()) {
+                    fixLightingLater(sky);
+                }
+            }
+        }, 1);
     }
 
     private boolean relightWithSpigotHook(RelightSkyEntry chunk) {
@@ -347,6 +401,18 @@ public class NMSRelighter implements Relighter {
     public synchronized void fixSkyLighting() {
         // Order chunks
         Map<Long, RelightSkyEntry> map = getSkyMap();
+        if (RivalsLightEngine.isAvailable()) {
+            Iterator<Map.Entry<Long, RelightSkyEntry>> hookIter = map.entrySet().iterator();
+            int size = SPIGOT_HOOK_DISPATCH_SIZE;
+            while (hookIter.hasNext() && size-- > 0) {
+                Map.Entry<Long, RelightSkyEntry> entry = hookIter.next();
+                RelightSkyEntry chunk = entry.getValue();
+                relightWithSpigotHook(chunk);
+                chunksToSend.put(entry.getKey(), chunk.bitmask);
+                hookIter.remove();
+            }
+            return;
+        }
         ArrayList<RelightSkyEntry> chunksList = new ArrayList<>(map.size());
         Iterator<Map.Entry<Long, RelightSkyEntry>> iter = map.entrySet().iterator();
         while (iter.hasNext()) {
@@ -354,12 +420,6 @@ public class NMSRelighter implements Relighter {
             chunksToSend.put(entry.getKey(), entry.getValue().bitmask);
             chunksList.add(entry.getValue());
             iter.remove();
-        }
-        if (RivalsLightEngine.isAvailable()) {
-            chunksList.removeIf(this::relightWithSpigotHook);
-            if (chunksList.isEmpty()) {
-                return;
-            }
         }
         Collections.sort(chunksList);
         int size = chunksList.size();
