@@ -288,7 +288,9 @@ public class NMSRelighter implements Relighter {
                     Iterator<Map.Entry<Long, RelightSkyEntry>> iter = map.entrySet().iterator();
                     while (iter.hasNext()) {
                         Map.Entry<Long, RelightSkyEntry> entry = iter.next();
-                        chunksToSend.put(entry.getKey(), entry.getValue().bitmask);
+                        RelightSkyEntry chunk = entry.getValue();
+                        relightWithSpigotHook(chunk);
+                        chunksToSend.put(entry.getKey(), chunk.bitmask);
                         iter.remove();
                     }
                 }
@@ -298,6 +300,10 @@ public class NMSRelighter implements Relighter {
         } catch (Throwable e) {
             e.printStackTrace();
         }
+    }
+
+    private boolean relightWithSpigotHook(RelightSkyEntry chunk) {
+        return RivalsLightEngine.relightChunk(queue, chunk.x, chunk.z);
     }
 
     public void fixBlockLighting() {
@@ -348,6 +354,12 @@ public class NMSRelighter implements Relighter {
             chunksToSend.put(entry.getKey(), entry.getValue().bitmask);
             chunksList.add(entry.getValue());
             iter.remove();
+        }
+        if (RivalsLightEngine.isAvailable()) {
+            chunksList.removeIf(this::relightWithSpigotHook);
+            if (chunksList.isEmpty()) {
+                return;
+            }
         }
         Collections.sort(chunksList);
         int size = chunksList.size();

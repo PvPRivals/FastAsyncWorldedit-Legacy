@@ -2,6 +2,7 @@ package com.boydti.fawe.example;
 
 import com.boydti.fawe.FaweCache;
 import com.boydti.fawe.object.FaweChunk;
+import com.boydti.fawe.object.RunnableVal;
 import com.boydti.fawe.util.MainUtil;
 import com.boydti.fawe.util.TaskManager;
 import com.sk89q.worldedit.world.World;
@@ -38,20 +39,32 @@ public abstract class NMSMappedFaweQueue<WORLD, CHUNK, CHUNKSECTION, SECTION> ex
     public void runTasks() {
         super.runTasks();
         if (!getRelighter().isEmpty()) {
-            TaskManager.IMP.async(new Runnable() {
+            Runnable task = new Runnable() {
                 @Override
                 public void run() {
-                    if (getSettings().IMP.LIGHTING.REMOVE_FIRST) {
+                    if (RivalsLightEngine.isAvailable()) {
+                        getRelighter().fixLightingSafe(hasSky());
+                    } else if (getSettings().IMP.LIGHTING.REMOVE_FIRST) {
                         getRelighter().removeAndRelight(hasSky());
                     } else {
                         getRelighter().fixLightingSafe(hasSky());
                     }
                 }
-            });
+            };
+            if (RivalsLightEngine.isAvailable()) {
+                TaskManager.IMP.sync(new RunnableVal<Object>() {
+                    @Override
+                    public void run(Object value) {
+                        task.run();
+                    }
+                });
+            } else {
+                TaskManager.IMP.async(task);
+            }
         }
     }
 
-    private final Relighter relighter = getSettings().IMP.LIGHTING.MODE > 0 ? new NMSRelighter(this) : NullRelighter.INSTANCE;
+    private final Relighter relighter = RivalsLightEngine.isAvailable() || getSettings().IMP.LIGHTING.MODE > 0 ? new NMSRelighter(this) : NullRelighter.INSTANCE;
 
     @Override
     public Relighter getRelighter() {
@@ -61,6 +74,10 @@ public abstract class NMSMappedFaweQueue<WORLD, CHUNK, CHUNKSECTION, SECTION> ex
     @Override
     public void end(FaweChunk chunk) {
         super.end(chunk);
+        if (RivalsLightEngine.isAvailable()) {
+            getRelighter().addChunk(chunk.getX(), chunk.getZ(), null, chunk.getBitMask());
+            return;
+        }
         if (getSettings().IMP.LIGHTING.MODE == 0) {
             sendChunk(chunk);
             return;
