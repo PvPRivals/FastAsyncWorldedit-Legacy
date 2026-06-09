@@ -42,7 +42,7 @@ public class NMSRelighter implements Relighter {
     public final IntegerTrio mutableBlockPos = new IntegerTrio();
 
     private static final int DISPATCH_SIZE = 64;
-    private static final int SPIGOT_HOOK_DISPATCH_SIZE = 16;
+    private static final int SPIGOT_HOOK_DISPATCH_SIZE = 6;
     private boolean removeFirst;
 
     public NMSRelighter(NMSMappedFaweQueue queue) {
