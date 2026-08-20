@@ -62,8 +62,9 @@ public class DefaultFaweQueueMap implements IFaweQueueMap {
 
     @Override
     public FaweChunk getFaweChunk(int cx, int cz) {
-        if (cx == lastX && cz == lastZ) {
-            return lastWrappedChunk;
+        ChunkCache cached = lastChunk;
+        if (cached != null && cached.x == cx && cached.z == cz) {
+            return cached.chunk;
         }
         long pair = MathMan.pairInt(cx, cz);
         FaweChunk chunk = this.blocks.get(pair);
@@ -72,21 +73,24 @@ public class DefaultFaweQueueMap implements IFaweQueueMap {
             FaweChunk previous = this.blocks.put(pair, chunk);
             if (previous != null) {
                 blocks.put(pair, previous);
-                return previous;
+                chunk = previous;
             }
-            this.blocks.put(pair, chunk);
         }
+        lastChunk = new ChunkCache(cx, cz, chunk);
         return chunk;
     }
 
     @Override
     public FaweChunk getCachedFaweChunk(int cx, int cz) {
-        if (cx == lastX && cz == lastZ) {
-            return lastWrappedChunk;
+        ChunkCache cached = lastChunk;
+        if (cached != null && cached.x == cx && cached.z == cz) {
+            return cached.chunk;
         }
         long pair = MathMan.pairInt(cx, cz);
         FaweChunk chunk = this.blocks.get(pair);
-        lastWrappedChunk = chunk;
+        if (chunk != null) {
+            lastChunk = new ChunkCache(cx, cz, chunk);
+        }
         return chunk;
     }
 
@@ -103,6 +107,7 @@ public class DefaultFaweQueueMap implements IFaweQueueMap {
     @Override
     public void clear() {
         blocks.clear();
+        lastChunk = null;
     }
 
     @Override
@@ -114,9 +119,30 @@ public class DefaultFaweQueueMap implements IFaweQueueMap {
         return parent.getFaweChunk(cx, cz);
     }
 
-    private volatile FaweChunk lastWrappedChunk;
-    private int lastX = Integer.MIN_VALUE;
-    private int lastZ = Integer.MIN_VALUE;
+    private volatile ChunkCache lastChunk;
+
+    private boolean isLastChunk(FaweChunk chunk) {
+        ChunkCache cached = lastChunk;
+        return cached != null && cached.chunk == chunk;
+    }
+
+    private void invalidate(FaweChunk chunk) {
+        if (isLastChunk(chunk)) {
+            lastChunk = null;
+        }
+    }
+
+    private static final class ChunkCache {
+        private final int x;
+        private final int z;
+        private final FaweChunk chunk;
+
+        private ChunkCache(int x, int z, FaweChunk chunk) {
+            this.x = x;
+            this.z = z;
+            this.chunk = chunk;
+        }
+    }
 
     @Override
     public boolean next(int amount, long time) {
@@ -130,9 +156,10 @@ public class DefaultFaweQueueMap implements IFaweQueueMap {
                     do {
                         if (iter.hasNext()) {
                             FaweChunk chunk = iter.next().getValue();
-                            if (skip && chunk == lastWrappedChunk) {
+                            if (skip && isLastChunk(chunk)) {
                                 continue;
                             }
+                            invalidate(chunk);
                             iter.remove();
                             parent.start(chunk);
                             chunk.call();
@@ -149,10 +176,11 @@ public class DefaultFaweQueueMap implements IFaweQueueMap {
                     for (int i = 0; i < amount && (result = iter.hasNext()); i++) {
                         Map.Entry<Long, FaweChunk> item = iter.next();
                         FaweChunk chunk = item.getValue();
-                        if (skip && chunk == lastWrappedChunk) {
+                        if (skip && isLastChunk(chunk)) {
                             i--;
                             continue;
                         }
+                        invalidate(chunk);
                         iter.remove();
                         parent.start(chunk);
                         service.submit(chunk);
@@ -165,9 +193,10 @@ public class DefaultFaweQueueMap implements IFaweQueueMap {
                             if (result = iter.hasNext()) {
                                 Map.Entry<Long, FaweChunk> item = iter.next();
                                 FaweChunk chunk = item.getValue();
-                                if (skip && chunk == lastWrappedChunk) {
+                                if (skip && isLastChunk(chunk)) {
                                     continue;
                                 }
+                                invalidate(chunk);
                                 iter.remove();
                                 parent.start(chunk);
                                 service.submit(chunk);

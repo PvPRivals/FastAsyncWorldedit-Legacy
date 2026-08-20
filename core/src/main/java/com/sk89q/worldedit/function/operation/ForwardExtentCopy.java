@@ -25,6 +25,7 @@ import com.boydti.fawe.object.extent.BlockTranslateExtent;
 import com.boydti.fawe.object.extent.PositionTransformExtent;
 import com.boydti.fawe.object.function.block.BiomeCopy;
 import com.boydti.fawe.object.function.block.CombinedBlockCopy;
+import com.boydti.fawe.object.function.block.ExistingBlockCopy;
 import com.boydti.fawe.object.function.block.SimpleBlockCopy;
 import com.boydti.fawe.util.MaskTraverser;
 import com.sk89q.worldedit.EditSession;
@@ -41,6 +42,7 @@ import com.sk89q.worldedit.function.RegionMaskingFilter;
 import com.sk89q.worldedit.function.entity.ExtentEntityCopy;
 import com.sk89q.worldedit.function.mask.Mask;
 import com.sk89q.worldedit.function.mask.Masks;
+import com.sk89q.worldedit.function.mask.ExistingBlockMask;
 import com.sk89q.worldedit.function.visitor.EntityVisitor;
 import com.sk89q.worldedit.function.visitor.FlatRegionVisitor;
 import com.sk89q.worldedit.function.visitor.IntersectRegionFunction;
@@ -306,6 +308,12 @@ public class ForwardExtentCopy implements Operation {
 
         if (blockCopy == null) {
             RegionFunction maskFunc = null;
+            boolean existingBlockCopy = currentTransform.isIdentity()
+                    && sourceFunction == null
+                    && filterFunction == null
+                    && sourceMask != null
+                    && sourceMask.getClass() == ExistingBlockMask.class
+                    && ((ExistingBlockMask) sourceMask).getExtent() == source;
 
             if (sourceFunction != null) {
                 Vector disAbs = translation.positive();
@@ -338,13 +346,15 @@ public class ForwardExtentCopy implements Operation {
                 }
                 copy = new CombinedBlockCopy(source, finalDest, copySrcFunc);
             }
-            else {
+            else if (existingBlockCopy) {
+                copy = new ExistingBlockCopy(source, finalDest);
+            } else {
                 copy = new SimpleBlockCopy(source, finalDest);
             }
             if (this.filterFunction != null) {
                 copy = new IntersectRegionFunction(filterFunction, copy);
             }
-            if (sourceMask != Masks.alwaysTrue()) {
+            if (sourceMask != Masks.alwaysTrue() && !existingBlockCopy) {
                 if (maskFunc != null) copy = new RegionMaskTestFunction(sourceMask, copy, maskFunc);
                 else copy = new RegionMaskingFilter(sourceMask, copy);
             }
