@@ -42,11 +42,13 @@ import com.sk89q.worldedit.function.entity.ExtentEntityCopy;
 import com.sk89q.worldedit.function.mask.Mask;
 import com.sk89q.worldedit.function.mask.Masks;
 import com.sk89q.worldedit.function.visitor.EntityVisitor;
+import com.sk89q.worldedit.function.visitor.FlatRegionVisitor;
 import com.sk89q.worldedit.function.visitor.IntersectRegionFunction;
 import com.sk89q.worldedit.function.visitor.RegionVisitor;
 import com.sk89q.worldedit.math.transform.AffineTransform;
 import com.sk89q.worldedit.math.transform.Identity;
 import com.sk89q.worldedit.math.transform.Transform;
+import com.sk89q.worldedit.regions.FlatRegion;
 import com.sk89q.worldedit.regions.Region;
 import java.util.ArrayList;
 import java.util.List;
@@ -274,6 +276,7 @@ public class ForwardExtentCopy implements Operation {
 
         RegionFunction copy;
         Operation blockCopy = null;
+        Operation biomeCopy = null;
         PositionTransformExtent transExt = null;
         if (!currentTransform.isIdentity()) {
             if (!(currentTransform instanceof AffineTransform) || ((AffineTransform) currentTransform).isOffAxis()) {
@@ -345,7 +348,13 @@ public class ForwardExtentCopy implements Operation {
                 if (maskFunc != null) copy = new RegionMaskTestFunction(sourceMask, copy, maskFunc);
                 else copy = new RegionMaskingFilter(sourceMask, copy);
             }
-            if (copyBiomes && (!(source instanceof BlockArrayClipboard) || ((BlockArrayClipboard) source).IMP.hasBiomes())) {
+            boolean hasBiomes = copyBiomes && (!(source instanceof BlockArrayClipboard) || ((BlockArrayClipboard) source).IMP.hasBiomes());
+            boolean flatBiomeCopy = hasBiomes && currentTransform.isIdentity() && region instanceof FlatRegion;
+            if (flatBiomeCopy) {
+                Extent biomeDestination = finalDest;
+                biomeCopy = new FlatRegionVisitor((FlatRegion) region,
+                        position -> biomeDestination.setBiome(position, source.getBiome(position)));
+            } else if (hasBiomes) {
                 copy = CombinedRegionFunction.combine(copy, new BiomeCopy(source, finalDest));
             }
             blockCopy = new RegionVisitor(region, copy, queue instanceof MappedFaweQueue ? (MappedFaweQueue) queue : null);
@@ -355,6 +364,9 @@ public class ForwardExtentCopy implements Operation {
 
         for (int i = 0; i < repetitions; i++) {
             Operations.completeBlindly(blockCopy);
+            if (biomeCopy != null) {
+                Operations.completeBlindly(biomeCopy);
+            }
 
             if (!entities.isEmpty()) {
                 ExtentEntityCopy entityCopy = new ExtentEntityCopy(from, destination, to, currentTransform);

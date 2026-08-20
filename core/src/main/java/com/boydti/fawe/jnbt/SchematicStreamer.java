@@ -47,11 +47,29 @@ public class SchematicStreamer extends NBTStreamer {
             public void run(int index, int value) {
                 if (value != 0) fc.setId(index, value);
             }
+
+            @Override
+            public void runBulk(int startIndex, byte[] values, int offset, int length) {
+                int end = offset + length;
+                for (int i = offset, index = startIndex; i < end; i++, index++) {
+                    int value = values[i] & 0xFF;
+                    if (value != 0) fc.setId(index, value);
+                }
+            }
         });
         addReader("Schematic.Data.#", new ByteReader() {
             @Override
             public void run(int index, int value) {
                 if (value != 0) fc.setData(index, value);
+            }
+
+            @Override
+            public void runBulk(int startIndex, byte[] values, int offset, int length) {
+                int end = offset + length;
+                for (int i = offset, index = startIndex; i < end; i++, index++) {
+                    int value = values[i] & 0xFF;
+                    if (value != 0) fc.setData(index, value);
+                }
             }
         });
         addReader("Schematic.AddBlocks.#", new ByteReader() {
@@ -65,11 +83,34 @@ public class SchematicStreamer extends NBTStreamer {
                     if (second != 0) fc.setAdd(gIndex + 1, second);
                 }
             }
+
+            @Override
+            public void runBulk(int startIndex, byte[] values, int offset, int length) {
+                int end = offset + length;
+                for (int i = offset, index = startIndex; i < end; i++, index++) {
+                    int value = values[i] & 0xFF;
+                    if (value != 0) {
+                        int first = value & 0x0F;
+                        int second = value >> 4;
+                        int globalIndex = index << 1;
+                        if (first != 0) fc.setAdd(globalIndex, first);
+                        if (second != 0) fc.setAdd(globalIndex + 1, second);
+                    }
+                }
+            }
         });
         ByteReader biomeReader = new ByteReader() {
             @Override
             public void run(int index, int value) {
                 fc.setBiome(index, value);
+            }
+
+            @Override
+            public void runBulk(int startIndex, byte[] values, int offset, int length) {
+                int end = offset + length;
+                for (int i = offset, index = startIndex; i < end; i++, index++) {
+                    fc.setBiome(index, values[i] & 0xFF);
+                }
             }
         };
         NBTStreamReader<Integer, Integer> initializer23 = new NBTStreamReader<Integer, Integer>() {

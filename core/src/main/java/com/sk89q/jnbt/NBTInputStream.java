@@ -134,6 +134,8 @@ public final class NBTInputStream implements Closeable {
     }
 
     private byte[] buf;
+    private static final int BYTE_ARRAY_BUFFER_SIZE = 16 * 1024;
+    private byte[] byteArrayBuffer;
 
     public void readTagPaylodLazy(int type, int depth, String node, RunnableVal2<String, RunnableVal2> getReader) throws IOException {
         switch (type) {
@@ -174,40 +176,14 @@ public final class NBTInputStream implements Closeable {
                 }
                 if (reader instanceof NBTStreamer.ByteReader) {
                     NBTStreamer.ByteReader byteReader = (NBTStreamer.ByteReader) reader;
-                    int i = 0;
-                    if (is instanceof InputStream) {
-                        DataInputStream dis = (DataInputStream) is;
-                        if (length > 1024) {
-                            if (buf == null) {
-                                buf = new byte[1024];
-                            }
-                            int left = length;
-                            for (; left > 1024; left -= 1024) {
-                                dis.readFully(buf);
-                                for (byte b : buf) {
-                                    byteReader.run(i++, b & 0xFF);
-                                }
-                            }
-                        }
-                        for (; i < length; i++) {
-                            byteReader.run(i, dis.read());
-                        }
-                    } else {
-                        if (length > 1024) {
-                            if (buf == null) {
-                                buf = new byte[1024];
-                            }
-                            int left = length;
-                            for (; left > 1024; left -= 1024) {
-                                is.readFully(buf);
-                                for (byte b : buf) {
-                                    byteReader.run(i++, b & 0xFF);
-                                }
-                            }
-                        }
-                        for (; i < length; i++) {
-                            byteReader.run(i, is.readByte() & 0xFF);
-                        }
+                    if (byteArrayBuffer == null) {
+                        byteArrayBuffer = new byte[BYTE_ARRAY_BUFFER_SIZE];
+                    }
+                    for (int i = 0; i < length; ) {
+                        int amount = Math.min(byteArrayBuffer.length, length - i);
+                        is.readFully(byteArrayBuffer, 0, amount);
+                        byteReader.runBulk(i, byteArrayBuffer, 0, amount);
+                        i += amount;
                     }
                 } else {
                     for (int i = 0; i < length; i++) {

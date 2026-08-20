@@ -80,6 +80,13 @@ public class NBTStreamer {
     }
 
     public static abstract class ByteReader extends RunnableVal2<Integer, Integer> {
+        public void runBulk(int startIndex, byte[] values, int offset, int length) {
+            int end = offset + length;
+            for (int i = offset, index = startIndex; i < end; i++, index++) {
+                run(index, values[i] & 0xFF);
+            }
+        }
+
         @Override
         public void run(Integer index, Integer value) {
             run((int) index, (int) value);
