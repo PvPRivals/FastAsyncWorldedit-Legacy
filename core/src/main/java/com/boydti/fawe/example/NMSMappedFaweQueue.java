@@ -2,7 +2,6 @@ package com.boydti.fawe.example;
 
 import com.boydti.fawe.FaweCache;
 import com.boydti.fawe.object.FaweChunk;
-import com.boydti.fawe.object.RunnableVal;
 import com.boydti.fawe.util.MainUtil;
 import com.boydti.fawe.util.TaskManager;
 import com.sk89q.worldedit.world.World;
@@ -39,8 +38,8 @@ public abstract class NMSMappedFaweQueue<WORLD, CHUNK, CHUNKSECTION, SECTION> ex
     public void runTasks() {
         super.runTasks();
         if (!getRelighter().isEmpty()) {
-            if (RivalsLightEngine.isAvailable() && getRelighter() instanceof NMSRelighter) {
-                ((NMSRelighter) getRelighter()).fixLightingLater(hasSky());
+            if (supportsAsyncChunkRelight() && getRelighter() instanceof NMSRelighter) {
+                ((NMSRelighter) getRelighter()).fixLightingAsync(hasSky());
                 return;
             }
             Runnable task = new Runnable() {
@@ -57,7 +56,7 @@ public abstract class NMSMappedFaweQueue<WORLD, CHUNK, CHUNKSECTION, SECTION> ex
         }
     }
 
-    private final Relighter relighter = RivalsLightEngine.isAvailable() || getSettings().IMP.LIGHTING.MODE > 0 ? new NMSRelighter(this) : NullRelighter.INSTANCE;
+    private final Relighter relighter = supportsAsyncChunkRelight() || getSettings().IMP.LIGHTING.MODE > 0 ? new NMSRelighter(this) : NullRelighter.INSTANCE;
 
     @Override
     public Relighter getRelighter() {
@@ -67,7 +66,7 @@ public abstract class NMSMappedFaweQueue<WORLD, CHUNK, CHUNKSECTION, SECTION> ex
     @Override
     public void end(FaweChunk chunk) {
         super.end(chunk);
-        if (RivalsLightEngine.isAvailable()) {
+        if (supportsAsyncChunkRelight()) {
             getRelighter().addChunk(chunk.getX(), chunk.getZ(), null, chunk.getBitMask());
             return;
         }
@@ -119,6 +118,14 @@ public abstract class NMSMappedFaweQueue<WORLD, CHUNK, CHUNKSECTION, SECTION> ex
     }
 
     public abstract void setHeightMap(FaweChunk chunk, byte[] heightMap);
+
+    public boolean supportsAsyncChunkRelight() {
+        return false;
+    }
+
+    public boolean relightChunkAsync(int x, int z) {
+        return false;
+    }
 
     public abstract void setFullbright(CHUNKSECTION sections);
 

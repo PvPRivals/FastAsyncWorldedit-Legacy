@@ -26,6 +26,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.WeakHashMap;
 import net.minecraft.server.v1_8_R3.Block;
 import net.minecraft.server.v1_8_R3.BlockPosition;
 import net.minecraft.server.v1_8_R3.Chunk;
@@ -689,6 +690,46 @@ public class BukkitQueue18R3 extends BukkitQueue_0<net.minecraft.server.v1_8_R3.
     }
 
     private WorldServer nmsWorld;
+    private static final Map<WorldServer, LightEngine> LIGHT_ENGINES = Collections.synchronizedMap(new WeakHashMap<WorldServer, LightEngine>());
+
+    @Override
+    public boolean supportsAsyncChunkRelight() {
+        return true;
+    }
+
+    @Override
+    public boolean relightChunkAsync(int x, int z) {
+        try {
+            for (int dx = -1; dx <= 1; ++dx) {
+                for (int dz = -1; dz <= 1; ++dz) {
+                    if (ensureChunkLoaded(x + dx, z + dz) == null) {
+                        return false;
+                    }
+                }
+            }
+
+            Chunk center = getCachedChunk(getWorld(), x, z);
+            if (center == null || nmsWorld == null) {
+                return false;
+            }
+
+            LightEngine engine;
+            synchronized (LIGHT_ENGINES) {
+                engine = LIGHT_ENGINES.get(nmsWorld);
+                if (engine == null) {
+                    engine = new LightEngine();
+                    LIGHT_ENGINES.put(nmsWorld, engine);
+                }
+            }
+            if (!engine.relightChunk(nmsWorld, center)) {
+                return false;
+            }
+            saveChunk(center);
+            return true;
+        } catch (Throwable ignored) {
+            return false;
+        }
+    }
 
     @Override
     public World getImpWorld() {
