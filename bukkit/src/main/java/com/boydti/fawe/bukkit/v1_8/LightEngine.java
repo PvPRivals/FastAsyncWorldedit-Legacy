@@ -7,15 +7,18 @@ import net.minecraft.server.v1_8_R3.IBlockData;
 import net.minecraft.server.v1_8_R3.World;
 
 import java.util.Arrays;
+import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.Semaphore;
+import java.util.concurrent.locks.ReentrantLock;
 
 /**
  * RelightEngine rebuilds all light inside one chunk from scratch. It uses a
  * padded 46 by 46 by 256 temporary volume so light can enter the center chunk
  * from every block that is close enough to affect it.
  *
- * Mutable temporary arrays belong to the engine instance. Calls are serialized
- * per world by {@link BukkitQueue18R3}, allowing the engine to run off-thread
- * without sharing scratch state between worlds.
+ * Temporary arrays are borrowed from a bounded, process-wide pool. A relight
+ * only locks the spatial regions touched by its 3 by 3 input chunk grid, so
+ * distant chunks (and different worlds) can be rebuilt concurrently.
  */
 final class LightEngine {
 
@@ -25,9 +28,13 @@ final class LightEngine {
     private static final int SKYLESS_Z_STRIDE = 1 << 8;
     private static final int SKYLESS_SIZE = SKYLESS_DIAMETER * 256 * SKYLESS_DIAMETER;
     private static final int SKYLESS_CHUNK_GRID = 3;
+    private static final int REGION_SHIFT = 3;
+    private static final int REGION_LOCK_COUNT = 1024;
+    private static final int REGION_LOCK_MASK = REGION_LOCK_COUNT - 1;
+    private static final int MAX_PARALLEL_RELIGHTS = Math.max(1, Runtime.getRuntime().availableProcessors());
+    private static final Semaphore RELIGHT_PERMITS = new Semaphore(MAX_PARALLEL_RELIGHTS);
+    private static final ConcurrentLinkedQueue<RelightEngine> AVAILABLE_ENGINES = new ConcurrentLinkedQueue<>();
 
-    private final byte[] skylessLight = new byte[SKYLESS_SIZE];
-    private final byte[] skylessOpacity = new byte[SKYLESS_SIZE];
     private static final boolean[] SKYLESS_CAN_SPREAD_NEG_X = new boolean[SKYLESS_DIAMETER * SKYLESS_DIAMETER];
     private static final boolean[] SKYLESS_CAN_SPREAD_POS_X = new boolean[SKYLESS_DIAMETER * SKYLESS_DIAMETER];
     private static final boolean[] SKYLESS_CAN_SPREAD_NEG_Z = new boolean[SKYLESS_DIAMETER * SKYLESS_DIAMETER];
@@ -37,13 +44,7 @@ final class LightEngine {
     private static final int[] SKYLESS_LOCAL_X = new int[SKYLESS_DIAMETER];
     private static final int[] SKYLESS_LOCAL_Z = new int[SKYLESS_DIAMETER];
     private static final int[] SKYLESS_COLUMN_BASE = new int[SKYLESS_DIAMETER * SKYLESS_DIAMETER];
-    private final Chunk[] skylessChunks = new Chunk[SKYLESS_CHUNK_GRID * SKYLESS_CHUNK_GRID];
-    private final int[][] skylessQueues = new int[16][];
-    private final int[] skylessQueueSizes = new int[16];
-    private int[] skylessBlockSourceIndices = new int[4096];
-    private byte[] skylessBlockSourceLevels = new byte[4096];
-    private int skylessBlockSourceCount;
-    private final RelightEngine relightEngine = new RelightEngine();
+    private final ReentrantLock[] regionLocks = new ReentrantLock[REGION_LOCK_COUNT];
 
     // Block state lookup tables.
     // The index is the block state id stored in ChunkSection.blockIds.
@@ -91,13 +92,82 @@ final class LightEngine {
     }
 
     LightEngine() {
-        for (int i = 0; i < skylessQueues.length; ++i) {
-            skylessQueues[i] = new int[4096];
+        for (int i = 0; i < regionLocks.length; ++i) {
+            regionLocks[i] = new ReentrantLock();
         }
     }
 
-    synchronized boolean relightChunk(World world, Chunk center) {
-        return relightEngine.relightChunk(world, center);
+    boolean relightChunk(World world, Chunk center) {
+        int[] lockedRegions = lockRegions(center.locX, center.locZ);
+        RelightEngine engine = null;
+        boolean permitAcquired = false;
+        boolean reusable = false;
+        try {
+            RELIGHT_PERMITS.acquireUninterruptibly();
+            permitAcquired = true;
+            engine = AVAILABLE_ENGINES.poll();
+            if (engine == null) {
+                engine = new RelightEngine();
+            }
+            boolean result = engine.relightChunk(world, center);
+            reusable = true;
+            return result;
+        } finally {
+            if (engine != null) {
+                engine.releaseReferences();
+                if (reusable) {
+                    AVAILABLE_ENGINES.offer(engine);
+                }
+            }
+            if (permitAcquired) {
+                RELIGHT_PERMITS.release();
+            }
+            unlockRegions(lockedRegions);
+        }
+    }
+
+    private int[] lockRegions(int chunkX, int chunkZ) {
+        int minRegionX = (chunkX - 1) >> REGION_SHIFT;
+        int maxRegionX = (chunkX + 1) >> REGION_SHIFT;
+        int minRegionZ = (chunkZ - 1) >> REGION_SHIFT;
+        int maxRegionZ = (chunkZ + 1) >> REGION_SHIFT;
+        int[] indices = new int[5];
+        int count = 0;
+
+        for (int regionX = minRegionX; regionX <= maxRegionX; ++regionX) {
+            for (int regionZ = minRegionZ; regionZ <= maxRegionZ; ++regionZ) {
+                int index = regionLockIndex(regionX, regionZ);
+                boolean duplicate = false;
+                for (int i = 1; i <= count; ++i) {
+                    if (indices[i] == index) {
+                        duplicate = true;
+                        break;
+                    }
+                }
+                if (!duplicate) {
+                    indices[++count] = index;
+                }
+            }
+        }
+
+        Arrays.sort(indices, 1, count + 1);
+        indices[0] = count;
+        for (int i = 1; i <= count; ++i) {
+            regionLocks[indices[i]].lock();
+        }
+        return indices;
+    }
+
+    private int regionLockIndex(int regionX, int regionZ) {
+        int hash = regionX * 73428767 ^ regionZ * 912931;
+        hash ^= hash >>> 16;
+        return hash & REGION_LOCK_MASK;
+    }
+
+    private void unlockRegions(int[] indices) {
+        for (int i = indices[0]; i > 0; --i) {
+            regionLocks[indices[i]].unlock();
+        }
     }
 
     /**
@@ -107,9 +177,25 @@ final class LightEngine {
      * Block light seeds are emitting blocks. Sky light seeds are columns above
      * the height map plus border cells that can push sky light inward.
      */
-    private final class RelightEngine {
+    private static final class RelightEngine {
+
+        private final byte[] skylessLight = new byte[SKYLESS_SIZE];
+        private final byte[] skylessOpacity = new byte[SKYLESS_SIZE];
+        private final Chunk[] skylessChunks = new Chunk[SKYLESS_CHUNK_GRID * SKYLESS_CHUNK_GRID];
+        private final int[][] skylessQueues = new int[16][];
+        private final int[] skylessQueueSizes = new int[16];
+        private int[] skylessBlockSourceIndices = new int[4096];
+        private byte[] skylessBlockSourceLevels = new byte[4096];
+        private int skylessBlockSourceCount;
 
         private RelightEngine() {
+            for (int i = 0; i < skylessQueues.length; ++i) {
+                skylessQueues[i] = new int[4096];
+            }
+        }
+
+        private void releaseReferences() {
+            Arrays.fill(skylessChunks, null);
         }
 
         private void relightSkylessChunk(World world, Chunk center) {
