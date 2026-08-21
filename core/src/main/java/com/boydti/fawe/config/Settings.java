@@ -466,6 +466,18 @@ public class Settings extends Config {
         public boolean DELAY_PACKET_SENDING = true;
         public boolean ASYNC = true;
         @Comment({
+                "Maximum number of chunks that the native relight engine may rebuild concurrently",
+                " - Each worker owns sizeable temporary propagation buffers",
+                " - Values above the number of concurrent edits usually only increase memory usage"
+        })
+        public int PARALLEL_THREADS = Math.max(1, (Runtime.getRuntime().availableProcessors() + 2) / 3);
+        @Comment({
+                "Maximum number of entries retained in each pooled light propagation queue",
+                " - Oversized queues are returned to their initial size after a relight",
+                " - This bounds the long-lived heap cost of unusually complex chunks"
+        })
+        public int MAX_RETAINED_QUEUE_SIZE = 262144;
+        @Comment({
                 "The relighting mode to use:",
                 " - 0 = None (Do no relighting)",
                 " - 1 = Optimal (Relight changed light sources and changed blocks)",

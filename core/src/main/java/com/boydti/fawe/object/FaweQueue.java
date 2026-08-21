@@ -59,6 +59,12 @@ public interface FaweQueue extends HasFaweQueue, Extent {
         return NullRelighter.INSTANCE;
     }
 
+    /**
+     * Finish any deferred lighting work that is part of this queue.
+     */
+    default void flushLighting() {
+    }
+
     @Override
     default Vector getMinimumPoint() {
         return new Vector(-30000000, 0, -30000000);
@@ -526,6 +532,7 @@ public interface FaweQueue extends HasFaweQueue, Extent {
                 }
             }
         }
+        flushLighting();
     }
 
     default boolean enqueue() {

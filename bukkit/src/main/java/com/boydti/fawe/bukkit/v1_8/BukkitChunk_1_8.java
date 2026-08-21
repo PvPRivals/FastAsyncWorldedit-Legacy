@@ -189,7 +189,12 @@ public class BukkitChunk_1_8 extends CharFaweChunk<Chunk, BukkitQueue18R3> {
                 if (internalIdArray == null) {
                     continue;
                 }
-                char[] newArray = Arrays.copyOf(internalIdArray, internalIdArray.length);
+                // The queue discards this FaweChunk after call() completes. When no change task
+                // can retain it, transfer the section array directly instead of allocating a
+                // second 8 KiB array for every newly-created void-world section.
+                char[] newArray = getParent().getChangeTask() == null
+                        ? internalIdArray
+                        : Arrays.copyOf(internalIdArray, internalIdArray.length);
                 int countAir = this.getAir(j);
                 ChunkSection section = sections[j];
                 if (section != null && BukkitQueue18R3.isDirty != null) {

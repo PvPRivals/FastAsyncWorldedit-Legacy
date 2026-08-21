@@ -50,6 +50,11 @@ public interface IDelegateFaweQueue extends FaweQueue {
     }
 
     @Override
+    default void flushLighting() {
+        getQueue().flushLighting();
+    }
+
+    @Override
     default Vector getMinimumPoint() {
         return getQueue().getMinimumPoint();
     }

@@ -36,23 +36,44 @@ public abstract class NMSMappedFaweQueue<WORLD, CHUNK, CHUNKSECTION, SECTION> ex
 
     @Override
     public void runTasks() {
-        super.runTasks();
-        if (!getRelighter().isEmpty()) {
+        if (getRelighter().isEmpty()) {
+            super.runTasks();
+            return;
+        }
+
+        if (getSettings().IMP.LIGHTING.ASYNC) {
+            super.runTasks();
             if (supportsAsyncChunkRelight() && getRelighter() instanceof NMSRelighter) {
                 ((NMSRelighter) getRelighter()).fixLightingAsync(hasSky());
-                return;
+            } else {
+                TaskManager.IMP.async(this::fixLighting);
             }
-            Runnable task = new Runnable() {
-                @Override
-                public void run() {
-                    if (getSettings().IMP.LIGHTING.REMOVE_FIRST) {
-                        getRelighter().removeAndRelight(hasSky());
-                    } else {
-                        getRelighter().fixLightingSafe(hasSky());
-                    }
-                }
-            };
-            TaskManager.IMP.async(task);
+            return;
+        }
+
+        // Wake queue flushers before relighting. Relighting can synchronously request a chunk
+        // load from the server thread, so doing it here before notifying creates a lock
+        // inversion when a timed-out flusher enters the same relighter.
+        super.runTasks();
+        // Bounded-memory callers use flushLighting() as the completion barrier. Starting a
+        // second relight here only makes that flusher contend with duplicate work.
+    }
+
+    @Override
+    public void flushLighting() {
+        if (!getSettings().IMP.LIGHTING.ASYNC) {
+            fixLighting();
+        }
+    }
+
+    private void fixLighting() {
+        if (getRelighter().isEmpty()) {
+            return;
+        }
+        if (getSettings().IMP.LIGHTING.REMOVE_FIRST) {
+            getRelighter().removeAndRelight(hasSky());
+        } else {
+            getRelighter().fixLightingSafe(hasSky());
         }
     }
 

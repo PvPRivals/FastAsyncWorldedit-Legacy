@@ -9,6 +9,7 @@ import com.sk89q.jnbt.IntTag;
 import com.sk89q.jnbt.Tag;
 import com.sk89q.worldedit.EditSession;
 import com.sk89q.worldedit.Vector;
+import com.sk89q.worldedit.WorldEditException;
 import com.sk89q.worldedit.blocks.BaseBlock;
 import com.sk89q.worldedit.entity.BaseEntity;
 import com.sk89q.worldedit.entity.Entity;
@@ -223,6 +224,64 @@ public class CPUOptimizedClipboard extends FaweClipboard {
         for (int index = 0; index < volume; index++) {
             task.run(index, blocks[index] >>> 4);
         }
+    }
+
+    /**
+     * Copies the packed clipboard directly without allocating a Vector for every block.
+     */
+    public int copyNonAirTo(Extent destination, int destinationMinX, int destinationMinY,
+                            int destinationMinZ) throws WorldEditException {
+        return copyNonAirTo(destination, destinationMinX, destinationMinY, destinationMinZ,
+                false);
+    }
+
+    /**
+     * Copies the packed clipboard and, when requested, its two-dimensional biome array.
+     */
+    public int copyNonAirTo(Extent destination, int destinationMinX, int destinationMinY,
+                            int destinationMinZ, boolean copyBiomes) throws WorldEditException {
+        convertTilesToIndex();
+        if (copyBiomes && hasBiomes()) {
+            for (int z = 0; z < length; z++) {
+                for (int x = 0; x < width; x++) {
+                    destination.setBiome(destinationMinX + x, destinationMinY,
+                            destinationMinZ + z, getBiome(x, z));
+                }
+            }
+        }
+        int affected = 0;
+        for (int chunkZ = 0; chunkZ < length; chunkZ += 16) {
+            int maximumZ = Math.min(length, chunkZ + 16);
+            for (int chunkX = 0; chunkX < width; chunkX += 16) {
+                int maximumX = Math.min(width, chunkX + 16);
+                for (int y = 0; y < height; y++) {
+                    int destinationY = destinationMinY + y;
+                    for (int z = chunkZ; z < maximumZ; z++) {
+                        int destinationZ = destinationMinZ + z;
+                        int index = chunkX + y * area + z * width;
+                        for (int x = chunkX; x < maximumX; x++, index++) {
+                            int combined = blocks[index];
+                            int id = combined >>> 4;
+                            if (id == 0) {
+                                continue;
+                            }
+                            BaseBlock block = FaweCache.CACHE_BLOCK[combined];
+                            if (NBT_BLOCK_IDS[id] && !nbtMapIndex.isEmpty()) {
+                                CompoundTag nbt = nbtMapIndex.get(index);
+                                if (nbt != null) {
+                                    block = new BaseBlock(id, combined & 0xF, nbt);
+                                }
+                            }
+                            if (destination.setBlock(destinationMinX + x, destinationY,
+                                    destinationZ, block)) {
+                                affected++;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        return affected;
     }
 
     @Override

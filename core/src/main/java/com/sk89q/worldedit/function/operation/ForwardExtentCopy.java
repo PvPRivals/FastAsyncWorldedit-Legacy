@@ -21,6 +21,7 @@ package com.sk89q.worldedit.function.operation;
 
 import com.boydti.fawe.example.MappedFaweQueue;
 import com.boydti.fawe.object.FaweQueue;
+import com.boydti.fawe.object.clipboard.CPUOptimizedClipboard;
 import com.boydti.fawe.object.extent.BlockTranslateExtent;
 import com.boydti.fawe.object.extent.PositionTransformExtent;
 import com.boydti.fawe.object.function.block.BiomeCopy;
@@ -276,7 +277,7 @@ public class ForwardExtentCopy implements Operation {
             finalDest = new BlockTranslateExtent(finalDest, translation.getBlockX(), translation.getBlockY(), translation.getBlockZ());
         }
 
-        RegionFunction copy;
+        RegionFunction copy = null;
         Operation blockCopy = null;
         Operation biomeCopy = null;
         PositionTransformExtent transExt = null;
@@ -306,6 +307,7 @@ public class ForwardExtentCopy implements Operation {
             }
         }
 
+        boolean packedClipboardPaste = false;
         if (blockCopy == null) {
             RegionFunction maskFunc = null;
             boolean existingBlockCopy = currentTransform.isIdentity()
@@ -315,7 +317,18 @@ public class ForwardExtentCopy implements Operation {
                     && sourceMask.getClass() == ExistingBlockMask.class
                     && ((ExistingBlockMask) sourceMask).getExtent() == source;
 
-            if (sourceFunction != null) {
+            if (existingBlockCopy && source instanceof BlockArrayClipboard
+                    && ((BlockArrayClipboard) source).IMP instanceof CPUOptimizedClipboard) {
+                Vector destinationMinimum = region.getMinimumPoint().add(translation);
+                blockCopy = new PackedClipboardPaste(
+                        (CPUOptimizedClipboard) ((BlockArrayClipboard) source).IMP,
+                        destination,
+                        destinationMinimum.getBlockX(),
+                        destinationMinimum.getBlockY(),
+                        destinationMinimum.getBlockZ(),
+                        copyBiomes);
+                packedClipboardPaste = true;
+            } else if (sourceFunction != null) {
                 Vector disAbs = translation.positive();
                 Vector size = region.getMaximumPoint().subtract(region.getMinimumPoint()).add(1, 1, 1);
                 boolean overlap = (disAbs.getBlockX() < size.getBlockX() && disAbs.getBlockY() < size.getBlockY() && disAbs.getBlockZ() < size.getBlockZ());
@@ -345,20 +358,22 @@ public class ForwardExtentCopy implements Operation {
                     };
                 }
                 copy = new CombinedBlockCopy(source, finalDest, copySrcFunc);
-            }
-            else if (existingBlockCopy) {
+            } else if (existingBlockCopy) {
                 copy = new ExistingBlockCopy(source, finalDest);
             } else {
                 copy = new SimpleBlockCopy(source, finalDest);
             }
-            if (this.filterFunction != null) {
-                copy = new IntersectRegionFunction(filterFunction, copy);
+            if (blockCopy == null) {
+                if (this.filterFunction != null) {
+                    copy = new IntersectRegionFunction(filterFunction, copy);
+                }
+                if (sourceMask != Masks.alwaysTrue() && !existingBlockCopy) {
+                    if (maskFunc != null) copy = new RegionMaskTestFunction(sourceMask, copy, maskFunc);
+                    else copy = new RegionMaskingFilter(sourceMask, copy);
+                }
             }
-            if (sourceMask != Masks.alwaysTrue() && !existingBlockCopy) {
-                if (maskFunc != null) copy = new RegionMaskTestFunction(sourceMask, copy, maskFunc);
-                else copy = new RegionMaskingFilter(sourceMask, copy);
-            }
-            boolean hasBiomes = copyBiomes && (!(source instanceof BlockArrayClipboard) || ((BlockArrayClipboard) source).IMP.hasBiomes());
+            boolean hasBiomes = !packedClipboardPaste && copyBiomes
+                    && (!(source instanceof BlockArrayClipboard) || ((BlockArrayClipboard) source).IMP.hasBiomes());
             boolean flatBiomeCopy = hasBiomes && currentTransform.isIdentity() && region instanceof FlatRegion;
             if (flatBiomeCopy) {
                 Extent biomeDestination = finalDest;
@@ -367,7 +382,10 @@ public class ForwardExtentCopy implements Operation {
             } else if (hasBiomes) {
                 copy = CombinedRegionFunction.combine(copy, new BiomeCopy(source, finalDest));
             }
-            blockCopy = new RegionVisitor(region, copy, queue instanceof MappedFaweQueue ? (MappedFaweQueue) queue : null);
+            if (blockCopy == null) {
+                blockCopy = new RegionVisitor(region, copy,
+                        queue instanceof MappedFaweQueue ? (MappedFaweQueue) queue : null);
+            }
         }
 
         List<? extends Entity> entities = isCopyEntities() ? source.getEntities(region) : new ArrayList<>();
@@ -405,5 +423,39 @@ public class ForwardExtentCopy implements Operation {
 
     public static Class<?> inject() {
         return ForwardExtentCopy.class;
+    }
+
+    private static final class PackedClipboardPaste implements Operation {
+        private final CPUOptimizedClipboard clipboard;
+        private final Extent destination;
+        private final int minimumX;
+        private final int minimumY;
+        private final int minimumZ;
+        private final boolean copyBiomes;
+
+        private PackedClipboardPaste(CPUOptimizedClipboard clipboard, Extent destination,
+                                     int minimumX, int minimumY, int minimumZ,
+                                     boolean copyBiomes) {
+            this.clipboard = clipboard;
+            this.destination = destination;
+            this.minimumX = minimumX;
+            this.minimumY = minimumY;
+            this.minimumZ = minimumZ;
+            this.copyBiomes = copyBiomes;
+        }
+
+        @Override
+        public Operation resume(RunContext run) throws WorldEditException {
+            clipboard.copyNonAirTo(destination, minimumX, minimumY, minimumZ, copyBiomes);
+            return null;
+        }
+
+        @Override
+        public void cancel() {
+        }
+
+        @Override
+        public void addStatusMessages(List<String> messages) {
+        }
     }
 }

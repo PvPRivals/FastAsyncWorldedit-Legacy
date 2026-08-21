@@ -690,7 +690,8 @@ public class BukkitQueue18R3 extends BukkitQueue_0<net.minecraft.server.v1_8_R3.
     }
 
     private WorldServer nmsWorld;
-    private static final Map<WorldServer, LightEngine> LIGHT_ENGINES = Collections.synchronizedMap(new WeakHashMap<WorldServer, LightEngine>());
+    private static final Map<WorldServer, LightEngine> LIGHT_ENGINES = new WeakHashMap<WorldServer, LightEngine>();
+    private volatile LightEngine lightEngine;
 
     @Override
     public boolean supportsAsyncChunkRelight() {
@@ -713,14 +714,7 @@ public class BukkitQueue18R3 extends BukkitQueue_0<net.minecraft.server.v1_8_R3.
                 return false;
             }
 
-            LightEngine engine;
-            synchronized (LIGHT_ENGINES) {
-                engine = LIGHT_ENGINES.get(nmsWorld);
-                if (engine == null) {
-                    engine = new LightEngine();
-                    LIGHT_ENGINES.put(nmsWorld, engine);
-                }
-            }
+            LightEngine engine = getLightEngine();
             if (!engine.relightChunk(nmsWorld, center)) {
                 return false;
             }
@@ -729,6 +723,22 @@ public class BukkitQueue18R3 extends BukkitQueue_0<net.minecraft.server.v1_8_R3.
         } catch (Throwable ignored) {
             return false;
         }
+    }
+
+    private LightEngine getLightEngine() {
+        LightEngine engine = lightEngine;
+        if (engine != null) {
+            return engine;
+        }
+        synchronized (LIGHT_ENGINES) {
+            engine = LIGHT_ENGINES.get(nmsWorld);
+            if (engine == null) {
+                engine = new LightEngine();
+                LIGHT_ENGINES.put(nmsWorld, engine);
+            }
+        }
+        lightEngine = engine;
+        return engine;
     }
 
     @Override

@@ -1,5 +1,6 @@
 package com.boydti.fawe.bukkit.v1_8;
 
+import com.boydti.fawe.config.Settings;
 import net.minecraft.server.v1_8_R3.Block;
 import net.minecraft.server.v1_8_R3.Chunk;
 import net.minecraft.server.v1_8_R3.ChunkSection;
@@ -31,7 +32,10 @@ final class LightEngine {
     private static final int REGION_SHIFT = 3;
     private static final int REGION_LOCK_COUNT = 1024;
     private static final int REGION_LOCK_MASK = REGION_LOCK_COUNT - 1;
-    private static final int MAX_PARALLEL_RELIGHTS = Math.max(1, Runtime.getRuntime().availableProcessors());
+    private static final int INITIAL_QUEUE_SIZE = 4096;
+    private static final int MAX_PARALLEL_RELIGHTS = Math.max(1, Settings.IMP.LIGHTING.PARALLEL_THREADS);
+    private static final int MAX_RETAINED_QUEUE_SIZE = Math.max(INITIAL_QUEUE_SIZE,
+            Settings.IMP.LIGHTING.MAX_RETAINED_QUEUE_SIZE);
     private static final Semaphore RELIGHT_PERMITS = new Semaphore(MAX_PARALLEL_RELIGHTS);
     private static final ConcurrentLinkedQueue<RelightEngine> AVAILABLE_ENGINES = new ConcurrentLinkedQueue<>();
 
@@ -190,12 +194,23 @@ final class LightEngine {
 
         private RelightEngine() {
             for (int i = 0; i < skylessQueues.length; ++i) {
-                skylessQueues[i] = new int[4096];
+                skylessQueues[i] = new int[INITIAL_QUEUE_SIZE];
             }
         }
 
         private void releaseReferences() {
             Arrays.fill(skylessChunks, null);
+            Arrays.fill(skylessQueueSizes, 0);
+            for (int i = 0; i < skylessQueues.length; ++i) {
+                if (skylessQueues[i].length > MAX_RETAINED_QUEUE_SIZE) {
+                    skylessQueues[i] = new int[INITIAL_QUEUE_SIZE];
+                }
+            }
+            if (skylessBlockSourceIndices.length > MAX_RETAINED_QUEUE_SIZE) {
+                skylessBlockSourceIndices = new int[INITIAL_QUEUE_SIZE];
+                skylessBlockSourceLevels = new byte[INITIAL_QUEUE_SIZE];
+            }
+            skylessBlockSourceCount = 0;
         }
 
         private void relightSkylessChunk(World world, Chunk center) {
@@ -512,8 +527,18 @@ final class LightEngine {
                             }
                             section = sections[y >> 4] = new ChunkSection(y >> 4 << 4, true);
                         }
-                        section.a(localX, y & 15, localZ, skyLight);
+                        int localIndex = ((y & 15) << 8) | (localZ << 4) | localX;
+                        byte[] light = section.getSkyLightArray().a();
+                        light[localIndex >> 1] |= (byte) (skyLight << ((localIndex & 1) << 2));
                     }
+                }
+            }
+
+            // Reassign the arrays so servers that track non-empty light counts can refresh
+            // their metadata once per section instead of once per block.
+            for (ChunkSection section : sections) {
+                if (section != null) {
+                    section.b(section.getSkyLightArray());
                 }
             }
         }
@@ -537,8 +562,16 @@ final class LightEngine {
                                 initNullSectionSkyLight(chunk, section);
                             }
                         }
-                        section.b(localX, y & 15, localZ, blockLight);
+                        int localIndex = ((y & 15) << 8) | (localZ << 4) | localX;
+                        byte[] light = section.getEmittedLightArray().a();
+                        light[localIndex >> 1] |= (byte) (blockLight << ((localIndex & 1) << 2));
                     }
+                }
+            }
+
+            for (ChunkSection section : sections) {
+                if (section != null) {
+                    section.a(section.getEmittedLightArray());
                 }
             }
         }
