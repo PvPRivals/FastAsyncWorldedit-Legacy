@@ -270,6 +270,9 @@ public class SchematicStreamer extends NBTStreamer {
             Vector origin = min.subtract(offset);
             Vector dimensions = new Vector(width, height, length);
             fc.setDimensions(dimensions);
+            if (fc instanceof CPUOptimizedClipboard) {
+                ((CPUOptimizedClipboard) fc).convertTilesToIndex();
+            }
             CuboidRegion region = new CuboidRegion(min, min.add(width, height, length).subtract(Vector.ONE));
             clipboard.init(region, fc);
             clipboard.setOrigin(origin);
