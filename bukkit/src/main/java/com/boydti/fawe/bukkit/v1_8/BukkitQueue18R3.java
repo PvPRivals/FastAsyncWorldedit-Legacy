@@ -21,6 +21,7 @@ import java.lang.reflect.Field;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
@@ -699,16 +700,45 @@ public class BukkitQueue18R3 extends BukkitQueue_0<net.minecraft.server.v1_8_R3.
     }
 
     @Override
-    public boolean relightChunkAsync(int x, int z) {
-        try {
+    public boolean prepareAsyncChunkRelight(Collection<Long> chunks) {
+        final Set<Long> required = new HashSet<>(chunks.size() * 2);
+        for (Long pair : chunks) {
+            int x = MathMan.unpairIntX(pair);
+            int z = MathMan.unpairIntY(pair);
             for (int dx = -1; dx <= 1; ++dx) {
                 for (int dz = -1; dz <= 1; ++dz) {
-                    if (ensureChunkLoaded(x + dx, z + dz) == null) {
-                        return false;
+                    int chunkX = x + dx;
+                    int chunkZ = z + dz;
+                    if (getCachedChunk(getWorld(), chunkX, chunkZ) == null) {
+                        required.add(MathMan.pairInt(chunkX, chunkZ));
                     }
                 }
             }
+        }
+        if (required.isEmpty()) {
+            return true;
+        }
 
+        Boolean loaded = TaskManager.IMP.sync(new RunnableVal<Boolean>() {
+            @Override
+            public void run(Boolean value) {
+                for (Long pair : required) {
+                    int x = MathMan.unpairIntX(pair);
+                    int z = MathMan.unpairIntY(pair);
+                    if (getCachedChunk(getWorld(), x, z) == null && loadChunk(getWorld(), x, z, true) == null) {
+                        this.value = false;
+                        return;
+                    }
+                }
+                this.value = true;
+            }
+        }, getSettings().HISTORY.CHUNK_WAIT_MS);
+        return Boolean.TRUE.equals(loaded);
+    }
+
+    @Override
+    public boolean relightChunkAsync(int x, int z) {
+        try {
             Chunk center = getCachedChunk(getWorld(), x, z);
             if (center == null || nmsWorld == null) {
                 return false;
@@ -720,7 +750,7 @@ public class BukkitQueue18R3 extends BukkitQueue_0<net.minecraft.server.v1_8_R3.
             }
             saveChunk(center);
             return true;
-        } catch (Throwable ignored) {
+        } catch (Throwable throwable) {
             return false;
         }
     }

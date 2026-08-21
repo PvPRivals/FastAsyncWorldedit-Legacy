@@ -144,6 +144,10 @@ public abstract class NMSMappedFaweQueue<WORLD, CHUNK, CHUNKSECTION, SECTION> ex
         return false;
     }
 
+    public boolean prepareAsyncChunkRelight(Collection<Long> chunks) {
+        return true;
+    }
+
     public boolean relightChunkAsync(int x, int z) {
         return false;
     }

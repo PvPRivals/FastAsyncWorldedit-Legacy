@@ -415,7 +415,7 @@ public abstract class MappedFaweQueue<WORLD, CHUNK, CHUNKSECTIONS, SECTION> impl
             cachedLoadChunk = null;
             loadChunk.value.x = cx;
             loadChunk.value.z = cz;
-            TaskManager.IMP.syncWhenFree(loadChunk, getSettings().HISTORY.CHUNK_WAIT_MS);
+            TaskManager.IMP.sync(loadChunk, getSettings().HISTORY.CHUNK_WAIT_MS);
             return cachedLoadChunk;
         } else {
             return null;

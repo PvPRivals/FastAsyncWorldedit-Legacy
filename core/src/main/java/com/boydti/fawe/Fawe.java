@@ -291,6 +291,9 @@ public class Fawe {
         if (stats != null) {
             stats.close();
         }
+        if (TaskManager.IMP != null) {
+            TaskManager.IMP.shutdown();
+        }
     }
 
     private boolean update() {

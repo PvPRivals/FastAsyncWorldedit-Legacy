@@ -307,22 +307,34 @@ public class NMSRelighter implements Relighter {
         }
     }
 
-    private synchronized boolean fixLightingWithAsyncEngine() {
-        Map<Long, RelightSkyEntry> map = getSkyMap();
-        Iterator<Map.Entry<Long, RelightSkyEntry>> iter = map.entrySet().iterator();
-        while (iter.hasNext()) {
-            Map.Entry<Long, RelightSkyEntry> entry = iter.next();
-            RelightSkyEntry chunk = entry.getValue();
-            if (queue.relightChunkAsync(chunk.x, chunk.z)) {
-                chunksToSend.put(entry.getKey(), chunk.bitmask);
-                iter.remove();
+    private boolean fixLightingWithAsyncEngine() {
+        List<Long> chunks;
+        synchronized (this) {
+            chunks = new ArrayList<>(getSkyMap().keySet());
+        }
+        if (!queue.prepareAsyncChunkRelight(chunks)) {
+            return false;
+        }
+
+        synchronized (this) {
+            Iterator<Map.Entry<Long, RelightSkyEntry>> iter = skyToRelight.entrySet().iterator();
+            while (iter.hasNext()) {
+                Map.Entry<Long, RelightSkyEntry> entry = iter.next();
+                RelightSkyEntry chunk = entry.getValue();
+                if (queue.relightChunkAsync(chunk.x, chunk.z)) {
+                    chunksToSend.put(entry.getKey(), chunk.bitmask);
+                    iter.remove();
+                }
+            }
+            if (!skyToRelight.isEmpty()) {
+                return false;
             }
         }
-        if (map.isEmpty()) {
+
+        if (queuedSkyToRelight.isEmpty()) {
             clearBlockLightQueues();
-            return true;
         }
-        return false;
+        return true;
     }
 
     private void clearBlockLightQueues() {

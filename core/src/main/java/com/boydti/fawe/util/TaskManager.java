@@ -51,6 +51,31 @@ public abstract class TaskManager {
     public abstract void task(final Runnable r);
 
     /**
+     * Submit work to the main thread as soon as the platform permits. Platforms without
+     * a subtick task queue fall back to their normal synchronous scheduler.
+     */
+    public void taskSubtick(final Runnable r) {
+        task(r);
+    }
+
+    public boolean supportsSubtickTasks() {
+        return false;
+    }
+
+    /**
+     * Submit work to the main thread after a high-resolution delay. The default
+     * implementation rounds up to the platform's tick scheduler.
+     */
+    public void taskSubtickLater(final Runnable r, long delayNanos) {
+        long tickNanos = TimeUnit.MILLISECONDS.toNanos(50);
+        long ticks = Math.max(1, (delayNanos + tickNanos - 1) / tickNanos);
+        later(r, (int) Math.min(Integer.MAX_VALUE, ticks));
+    }
+
+    public void shutdown() {
+    }
+
+    /**
      * Get the public ForkJoinPool<br>
      * - ONLY SUBMIT SHORT LIVED TASKS<br>
      * - DO NOT USE SLEEP/WAIT/LOCKS IN ANY SUBMITTED TASKS<br>

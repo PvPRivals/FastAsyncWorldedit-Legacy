@@ -22,16 +22,16 @@ public class SetQueue {
     /**
      * The implementation specific queue
      */
-    public static final SetQueue IMP = new SetQueue();
+    public static final SetQueue IMP = create();
     private double targetTPS = 18;
 
     public enum QueueStage {
         INACTIVE, ACTIVE, NONE;
     }
 
-    private final ConcurrentLinkedDeque<FaweQueue> activeQueues;
-    private final ConcurrentLinkedDeque<FaweQueue> inactiveQueues;
-    private final ConcurrentLinkedDeque<Runnable> tasks;
+    protected final ConcurrentLinkedDeque<FaweQueue> activeQueues;
+    protected final ConcurrentLinkedDeque<FaweQueue> inactiveQueues;
+    protected final ConcurrentLinkedDeque<Runnable> tasks;
 
     /**
      * Used to calculate elapsed time in milliseconds and ensure block placement doesn't lag the server
@@ -43,7 +43,7 @@ public class SetQueue {
     /**
      * A queue of tasks that will run when the queue is empty
      */
-    private final ConcurrentLinkedDeque<Runnable> emptyTasks = new ConcurrentLinkedDeque<>();
+    protected final ConcurrentLinkedDeque<Runnable> emptyTasks = new ConcurrentLinkedDeque<>();
 
     private ForkJoinPool pool = new ForkJoinPool();
     private ExecutorCompletionService completer = new ExecutorCompletionService(pool);
@@ -73,11 +73,25 @@ public class SetQueue {
         }
     }
 
+    private static SetQueue create() {
+        if (Settings.IMP.QUEUE.SUBTICK != null && Settings.IMP.QUEUE.SUBTICK.ENABLED) {
+            if (TaskManager.IMP != null && TaskManager.IMP.supportsSubtickTasks()) {
+                return new SubtickSetQueue();
+            }
+            Fawe.debug("Subtick queue scheduling is unavailable; using the legacy scheduler.");
+        }
+        return new SetQueue();
+    }
+
     public SetQueue() {
+        this(true);
+    }
+
+    protected SetQueue(boolean scheduleLegacyWorker) {
         tasks = new ConcurrentLinkedDeque<>();
         activeQueues = new ConcurrentLinkedDeque();
         inactiveQueues = new ConcurrentLinkedDeque<>();
-        if (TaskManager.IMP == null) return;
+        if (!scheduleLegacyWorker || TaskManager.IMP == null) return;
         TaskManager.IMP.repeat(new Runnable() {
             @Override
             public void run() {
@@ -169,7 +183,7 @@ public class SetQueue {
         }, 1);
     }
 
-    private void processQueue(FaweQueue queue, long time) {
+    protected void processQueue(FaweQueue queue, long time) {
         // Disable the async catcher as it can't discern async vs parallel
         boolean parallel = Settings.IMP.QUEUE.PARALLEL_THREADS > 1;
         boolean complete = false;
@@ -219,6 +233,7 @@ public class SetQueue {
                 queue.optimize();
                 activeQueues.add(queue);
             }
+            onWorkAdded();
             return true;
         }
         return false;
@@ -253,6 +268,7 @@ public class SetQueue {
         if (autoqueue) {
             queue.setStage(QueueStage.INACTIVE);
             inactiveQueues.add(queue);
+            onWorkAdded();
         }
         return queue;
     }
@@ -262,6 +278,7 @@ public class SetQueue {
         if (autoqueue) {
             queue.setStage(QueueStage.INACTIVE);
             inactiveQueues.add(queue);
+            onWorkAdded();
         }
         return queue;
     }
@@ -283,8 +300,7 @@ public class SetQueue {
             MainUtil.handleError(e);
         } finally {
             queue.endSet(Settings.IMP.QUEUE.PARALLEL_THREADS > 1);
-            queue.setStage(QueueStage.NONE);
-            queue.runTasks();
+            dequeue(queue);
             if (parallelThreads != 0) {
                 Settings.IMP.QUEUE.PARALLEL_THREADS = parallelThreads;
             }
@@ -314,6 +330,10 @@ public class SetQueue {
                 FaweQueue firstNonEmpty = null;
                 while (iter.hasNext()) {
                     FaweQueue queue = iter.next();
+                    if (queue.getStage() == QueueStage.NONE) {
+                        iter.remove();
+                        continue;
+                    }
                     long age = now - queue.getModified();
                     total += queue.size();
                     if (queue.size() == 0) {
@@ -424,6 +444,10 @@ public class SetQueue {
 
     public void addTask(Runnable whenFree) {
         tasks.add(whenFree);
+        onWorkAdded();
+    }
+
+    protected void onWorkAdded() {
     }
 
     /**
@@ -447,7 +471,7 @@ public class SetQueue {
         return false;
     }
 
-    private synchronized boolean runEmptyTasks() {
+    protected synchronized boolean runEmptyTasks() {
         if (this.emptyTasks.isEmpty()) {
             return false;
         }

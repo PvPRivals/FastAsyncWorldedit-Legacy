@@ -351,6 +351,7 @@ public class BukkitChunk_1_8 extends CharFaweChunk<Chunk, BukkitQueue18R3> {
             }
         } catch (Throwable e) {
             MainUtil.handleError(e);
+        } finally {
         }
         return this;
     }

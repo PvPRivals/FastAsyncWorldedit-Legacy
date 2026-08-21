@@ -1306,14 +1306,19 @@ public class EditSession extends AbstractDelegateExtent implements HasFaweQueue,
         // Reset limit
         limit.set(originalLimit);
         // Enqueue it
-        if (queue == null || queue.isEmpty()) {
-            queue.dequeue();
-            return;
-        }
-        if (Fawe.isMainThread() && (!(queue instanceof MCAQueue) || ((MCAQueue) queue).hasParent())) {
-            SetQueue.IMP.flush(queue);
-        } else {
-            queue.flush();
+        if (queue != null) {
+            if (queue.isEmpty()) {
+                // Subtick dispatch may have placed the last chunk before this edit is
+                // flushed. Placement being empty does not mean that its queued light
+                // work has completed, so retain the lighting completion barrier.
+                queue.dequeue();
+                queue.flushLighting();
+            } else if (Fawe.isMainThread() && (!(queue instanceof MCAQueue) || ((MCAQueue) queue).hasParent())) {
+                SetQueue.IMP.flush(queue);
+                queue.flushLighting();
+            } else {
+                queue.flush();
+            }
         }
         if (getChangeSet() != null) {
             if (Settings.IMP.HISTORY.COMBINE_STAGES) {

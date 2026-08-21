@@ -264,6 +264,25 @@ public class Settings extends Config {
 
     @Comment("This relates to how FAWE places chunks")
     public static class QUEUE {
+        @Create
+        public static SUBTICK SUBTICK;
+
+        public static class SUBTICK {
+            @Comment({
+                    "Use the subtick queue scheduler when the platform supports it:",
+                    " - Work is submitted to the main-thread task queue immediately",
+                    " - Disable this to use the legacy once-per-tick scheduler"
+            })
+            public boolean ENABLED = false;
+
+            @Comment({
+                    "Maximum time spent processing queued work in each 50ms window",
+                    " - A single non-preemptible queue batch may exceed this value"
+            })
+            public int MAX_TIME_MS = 10;
+
+        }
+
         @Comment({
                 "This should equal the number of processors you have",
                 " - Set this to 1 if you need reliable `/timings`"
