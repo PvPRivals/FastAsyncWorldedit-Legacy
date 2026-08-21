@@ -9,7 +9,9 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.ConcurrentModificationException;
+import java.util.HashSet;
 import java.util.Iterator;
+import java.util.Set;
 import java.util.concurrent.ConcurrentLinkedDeque;
 import java.util.concurrent.ExecutorCompletionService;
 import java.util.concurrent.ForkJoinPool;
@@ -152,43 +154,55 @@ public class SetQueue {
                         }
                     }
 
-                    FaweQueue queue = getNextQueue();
-                    if (queue == null) {
-                        return;
-                    }
+                    long deadline = now + Math.max(0, Settings.IMP.QUEUE.EXTRA_TIME_MS + currentAllocate);
+                    int availableQueues = activeQueues.isEmpty()
+                            ? inactiveQueues.size()
+                            : activeQueues.size();
+                    int queueLimit = Math.min(Math.max(1, Settings.IMP.QUEUE.MAX_QUEUES_PER_TICK),
+                            Math.max(1, availableQueues));
+                    Set<FaweQueue> processed = new HashSet<>(queueLimit);
+                    for (int i = 0; i < queueLimit; i++) {
+                        FaweQueue queue = getNextQueue();
+                        if (queue == null || !processed.add(queue)) {
+                            break;
+                        }
 
-                    long time = Settings.IMP.QUEUE.EXTRA_TIME_MS + currentAllocate - System.currentTimeMillis() + now;
-                    // Disable the async catcher as it can't discern async vs parallel
-                    boolean parallel = Settings.IMP.QUEUE.PARALLEL_THREADS > 1;
-                    queue.startSet(parallel);
-                    try {
-                        if (!queue.next(Settings.IMP.QUEUE.PARALLEL_THREADS, time) && queue.getStage() == QueueStage.ACTIVE) {
-                            queue.setStage(QueueStage.NONE);
-                            queue.runTasks();
-                        }
-                    } catch (Throwable e) {
-                        pool.awaitQuiescence(Settings.IMP.QUEUE.DISCARD_AFTER_MS, TimeUnit.MILLISECONDS);
-                        completer = new ExecutorCompletionService(pool);
-                        e.printStackTrace();
+                        int queuesLeft = queueLimit - i;
+                        long remaining = Math.max(0, deadline - System.currentTimeMillis());
+                        long time = remaining / queuesLeft;
+                        processQueue(queue, time);
                     }
-                    if (pool.getQueuedSubmissionCount() != 0 || pool.getRunningThreadCount() != 0 || pool.getQueuedTaskCount() != 0) {
-//                        if (Fawe.get().isJava8())
-                        {
-                            pool.awaitQuiescence(Long.MAX_VALUE, TimeUnit.MILLISECONDS);
-                        }
-//                        else {
-//                            pool.shutdown();
-//                            pool.awaitTermination(Long.MAX_VALUE, TimeUnit.MILLISECONDS);
-//                            pool = new ForkJoinPool();
-//                            completer = new ExecutorCompletionService(pool);
-//                        }
-                    }
-                    queue.endSet(parallel);
                 } catch (Throwable e) {
                     e.printStackTrace();
                 }
             }
         }, 1);
+    }
+
+    private void processQueue(FaweQueue queue, long time) {
+        // Disable the async catcher as it can't discern async vs parallel
+        boolean parallel = Settings.IMP.QUEUE.PARALLEL_THREADS > 1;
+        boolean complete = false;
+        queue.startSet(parallel);
+        try {
+            if (!queue.next(Settings.IMP.QUEUE.PARALLEL_THREADS, time)
+                    && queue.getStage() == QueueStage.ACTIVE) {
+                complete = true;
+            }
+        } catch (Throwable e) {
+            pool.awaitQuiescence(Settings.IMP.QUEUE.DISCARD_AFTER_MS, TimeUnit.MILLISECONDS);
+            completer = new ExecutorCompletionService(pool);
+            e.printStackTrace();
+        } finally {
+            if (pool.getQueuedSubmissionCount() != 0 || pool.getRunningThreadCount() != 0
+                    || pool.getQueuedTaskCount() != 0) {
+                pool.awaitQuiescence(Long.MAX_VALUE, TimeUnit.MILLISECONDS);
+            }
+            queue.endSet(parallel);
+        }
+        if (complete) {
+            dequeue(queue);
+        }
     }
 
     public QueueStage getStage(FaweQueue queue) {
@@ -290,14 +304,16 @@ public class SetQueue {
     public FaweQueue getNextQueue() {
         long now = System.currentTimeMillis();
         while (!activeQueues.isEmpty()) {
-            FaweQueue queue = activeQueues.peek();
+            FaweQueue queue = activeQueues.poll();
             if (queue != null && queue.size() > 0) {
+                activeQueues.add(queue);
                 queue.setModified(now);
                 return queue;
             } else {
-                queue.setStage(QueueStage.NONE);
-                queue.runTasks();
-                activeQueues.poll();
+                if (queue != null) {
+                    queue.setStage(QueueStage.NONE);
+                    queue.runTasks();
+                }
             }
         }
         int size = inactiveQueues.size();
@@ -323,10 +339,12 @@ public class SetQueue {
                     }
                     if (total > Settings.IMP.QUEUE.TARGET_SIZE) {
                         firstNonEmpty.setModified(now);
+                        rotateInactiveQueue(firstNonEmpty);
                         return firstNonEmpty;
                     }
                     if (age > Settings.IMP.QUEUE.MAX_WAIT_MS) {
                         queue.setModified(now);
+                        rotateInactiveQueue(queue);
                         return queue;
                     }
                 }
@@ -335,6 +353,12 @@ public class SetQueue {
             }
         }
         return null;
+    }
+
+    private void rotateInactiveQueue(FaweQueue queue) {
+        if (inactiveQueues.remove(queue) && queue.getStage() == QueueStage.INACTIVE) {
+            inactiveQueues.add(queue);
+        }
     }
 
     public boolean next() {

@@ -269,6 +269,16 @@ public class Settings extends Config {
                 " - Set this to 1 if you need reliable `/timings`"
         })
         public int PARALLEL_THREADS = Math.max(1, Runtime.getRuntime().availableProcessors());
+
+        @Comment({
+                "Maximum number of independent edit queues to service per tick:",
+                " - Higher values reduce flush latency when plugins run concurrent edits",
+                " - The shared tick-time allocation is divided between the queues",
+                " - Every selected queue may still execute one minimum parallel batch",
+                " - Increase this on dedicated generation servers where long ticks are acceptable"
+        })
+        public int MAX_QUEUES_PER_TICK = 1;
+
         @Create
         public static PROGRESS PROGRESS;
         @Comment({

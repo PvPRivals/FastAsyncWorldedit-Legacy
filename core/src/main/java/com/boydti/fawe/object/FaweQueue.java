@@ -513,12 +513,13 @@ public interface FaweQueue extends HasFaweQueue, Extent {
                 SetQueue.IMP.flush(this);
             } else {
                 if (enqueue()) {
-                    while (!isEmpty() && getStage() == SetQueue.QueueStage.ACTIVE) {
-                        synchronized (this) {
+                    synchronized (this) {
+                        while (!isEmpty() && getStage() == SetQueue.QueueStage.ACTIVE) {
                             try {
                                 this.wait(time);
                             } catch (InterruptedException e) {
-                                e.printStackTrace();
+                                Thread.currentThread().interrupt();
+                                break;
                             }
                         }
                     }

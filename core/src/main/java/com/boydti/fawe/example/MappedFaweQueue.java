@@ -48,7 +48,7 @@ public abstract class MappedFaweQueue<WORLD, CHUNK, CHUNKSECTIONS, SECTION> impl
     private long modified = System.currentTimeMillis();
     private RunnableVal2<FaweChunk, FaweChunk> changeTask;
     private RunnableVal2<ProgressType, Integer> progressTask;
-    private SetQueue.QueueStage stage;
+    private volatile SetQueue.QueueStage stage;
     private Settings settings = Settings.IMP;
     public ConcurrentLinkedDeque<Runnable> tasks = new ConcurrentLinkedDeque<>();
 
