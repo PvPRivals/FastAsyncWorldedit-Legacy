@@ -17,10 +17,14 @@ import java.util.concurrent.ExecutorCompletionService;
 import java.util.concurrent.ForkJoinPool;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 public class WeakFaweQueueMap implements IFaweQueueMap {
 
     private final MappedFaweQueue parent;
+
+    // Chunks handed to the pool but not written yet, see DefaultFaweQueueMap.
+    private final AtomicInteger dispatching = new AtomicInteger();
 
     public WeakFaweQueueMap(MappedFaweQueue parent) {
         this.parent = parent;
@@ -140,7 +144,7 @@ public class WeakFaweQueueMap implements IFaweQueueMap {
 
     @Override
     public int size() {
-        return blocks.size();
+        return blocks.size() + dispatching.get();
     }
 
     private FaweChunk getNewFaweChunk(int cx, int cz) {
@@ -196,6 +200,7 @@ public class WeakFaweQueueMap implements IFaweQueueMap {
                     iter.remove();
                     if (chunk != null) {
                         parent.start(chunk);
+                        dispatching.incrementAndGet();
                         service.submit(chunk);
                         added++;
                         i++;
@@ -217,10 +222,12 @@ public class WeakFaweQueueMap implements IFaweQueueMap {
                             iter.remove();
                             if (chunk != null) {
                                 parent.start(chunk);
+                                dispatching.incrementAndGet();
                                 service.submit(chunk);
                                 Future future = service.poll(50, TimeUnit.MILLISECONDS);
                                 if (future != null) {
                                     FaweChunk fc = (FaweChunk) future.get();
+                                    dispatching.decrementAndGet();
                                     parent.end(fc);
                                 }
                             }
@@ -231,9 +238,12 @@ public class WeakFaweQueueMap implements IFaweQueueMap {
                 Future future;
                 while ((future = service.poll()) != null) {
                     FaweChunk fc = (FaweChunk) future.get();
+                    dispatching.decrementAndGet();
                     parent.end(fc);
                 }
+                dispatching.set(0);
             } catch (Throwable e) {
+                dispatching.set(0);
                 e.printStackTrace();
             }
             return !blocks.isEmpty();

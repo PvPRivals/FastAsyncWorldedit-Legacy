@@ -520,7 +520,12 @@ public interface FaweQueue extends HasFaweQueue, Extent {
             } else {
                 if (enqueue()) {
                     synchronized (this) {
-                        while (!isEmpty() && getStage() == SetQueue.QueueStage.ACTIVE) {
+                        while (!isEmpty()) {
+                            // A queue the dispatcher has not picked up yet is not done, so put it
+                            // back in line instead of returning while its blocks are unwritten.
+                            if (getStage() == SetQueue.QueueStage.NONE) {
+                                enqueue();
+                            }
                             try {
                                 this.wait(time);
                             } catch (InterruptedException e) {

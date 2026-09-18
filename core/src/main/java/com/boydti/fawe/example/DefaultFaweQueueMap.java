@@ -14,10 +14,15 @@ import java.util.concurrent.ExecutorCompletionService;
 import java.util.concurrent.ForkJoinPool;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 public class DefaultFaweQueueMap implements IFaweQueueMap {
 
     private final MappedFaweQueue parent;
+
+    // Chunks handed to the pool but not written yet. Without them the queue looks empty while
+    // its blocks are still in flight, so flushers wake up and callers may unload those chunks.
+    private final AtomicInteger dispatching = new AtomicInteger();
 
     public DefaultFaweQueueMap(MappedFaweQueue parent) {
         this.parent = parent;
@@ -112,7 +117,7 @@ public class DefaultFaweQueueMap implements IFaweQueueMap {
 
     @Override
     public int size() {
-        return blocks.size();
+        return blocks.size() + dispatching.get();
     }
 
     private FaweChunk getNewFaweChunk(int cx, int cz) {
@@ -183,6 +188,7 @@ public class DefaultFaweQueueMap implements IFaweQueueMap {
                         invalidate(chunk);
                         iter.remove();
                         parent.start(chunk);
+                        dispatching.incrementAndGet();
                         service.submit(chunk);
                         added++;
                     }
@@ -199,10 +205,12 @@ public class DefaultFaweQueueMap implements IFaweQueueMap {
                                 invalidate(chunk);
                                 iter.remove();
                                 parent.start(chunk);
+                                dispatching.incrementAndGet();
                                 service.submit(chunk);
                                 Future future = service.poll(50, TimeUnit.MILLISECONDS);
                                 if (future != null) {
                                     FaweChunk fc = (FaweChunk) future.get();
+                                    dispatching.decrementAndGet();
                                     parent.end(fc);
                                 }
                             }
@@ -212,10 +220,13 @@ public class DefaultFaweQueueMap implements IFaweQueueMap {
                     Future future;
                     while ((future = service.poll()) != null) {
                         FaweChunk fc = (FaweChunk) future.get();
+                        dispatching.decrementAndGet();
                         parent.end(fc);
                     }
+                    dispatching.set(0);
                 }
             } catch (Throwable e) {
+                dispatching.set(0);
                 e.printStackTrace();
             }
             return !blocks.isEmpty();
