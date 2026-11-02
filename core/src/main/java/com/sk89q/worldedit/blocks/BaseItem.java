@@ -34,7 +34,9 @@ public class BaseItem {
     private int id;
     private short data;
     private CompoundTag nbt;
-    private final Map<Integer, Integer> enchantments = new HashMap<Integer, Integer>();
+    // Created on first use, FaweCache keeps an item for every id and data value and almost none of them
+    // ever get enchantments
+    private Map<Integer, Integer> enchantments;
 
     /**
      * Construct the object.
@@ -131,6 +133,10 @@ public class BaseItem {
      * @return map of enchantments
      */
     public Map<Integer, Integer> getEnchantments() {
+        Map<Integer, Integer> enchantments = this.enchantments;
+        if (enchantments == null) {
+            this.enchantments = enchantments = new HashMap<Integer, Integer>();
+        }
         return enchantments;
     }
 
