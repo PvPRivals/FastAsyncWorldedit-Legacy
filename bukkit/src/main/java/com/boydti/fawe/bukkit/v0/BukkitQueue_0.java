@@ -249,18 +249,33 @@ public abstract class BukkitQueue_0<CHUNK, CHUNKSECTIONS, SECTION> extends NMSMa
 
     public static ConcurrentHashMap<Long, Long> keepLoaded = new ConcurrentHashMap<>(8, 0.9f, 1);
 
+    /**
+     * The key of a chunk in {@link #keepLoaded}. A key packed as x and z has the hash x ^ z, the same for every chunk
+     * on a diagonal, so the chunks of an arena or region filled the same few bins and turned them into trees. Mixing
+     * the bits, which keeps every key distinct, spreads them over the map.
+     */
+    public static long keepLoadedKey(int x, int z) {
+        long key = MathMan.pairInt(x, z);
+        key ^= key >>> 33;
+        key *= 0xff51afd7ed558ccdL;
+        key ^= key >>> 33;
+        key *= 0xc4ceb9fe1a85ec53L;
+        key ^= key >>> 33;
+        return key;
+    }
+
 
     @EventHandler
     public static void onChunkLoad(ChunkLoadEvent event) {
         Chunk chunk = event.getChunk();
-        long pair = MathMan.pairInt(chunk.getX(), chunk.getZ());
+        long pair = keepLoadedKey(chunk.getX(), chunk.getZ());
         keepLoaded.putIfAbsent(pair, Fawe.get().getTimer().getTickStart());
     }
 
     @EventHandler
     public static void onChunkUnload(ChunkUnloadEvent event) {
         Chunk chunk = event.getChunk();
-        long pair = MathMan.pairInt(chunk.getX(), chunk.getZ());
+        long pair = keepLoadedKey(chunk.getX(), chunk.getZ());
         Long lastLoad = keepLoaded.get(pair);
         if (lastLoad != null) {
             if (Fawe.get().getTimer().getTickStart() - lastLoad < 10000) {
@@ -274,7 +289,7 @@ public abstract class BukkitQueue_0<CHUNK, CHUNKSECTIONS, SECTION> extends NMSMa
     @Override
     public boolean queueChunkLoad(int cx, int cz) {
         if (super.queueChunkLoad(cx, cz)) {
-            keepLoaded.put(MathMan.pairInt(cx, cz), System.currentTimeMillis());
+            keepLoaded.put(keepLoadedKey(cx, cz), System.currentTimeMillis());
             return true;
         }
         return false;
@@ -343,7 +358,7 @@ public abstract class BukkitQueue_0<CHUNK, CHUNKSECTIONS, SECTION> extends NMSMa
 
     @Override
     public boolean regenerateChunk(World world, int x, int z, BaseBiome biome, Long seed) {
-        if (!keepLoaded.isEmpty()) keepLoaded.remove(MathMan.pairInt(x, z));
+        if (!keepLoaded.isEmpty()) keepLoaded.remove(keepLoadedKey(x, z));
         boolean result = world.regenerateChunk(x, z);
         return result;
     }

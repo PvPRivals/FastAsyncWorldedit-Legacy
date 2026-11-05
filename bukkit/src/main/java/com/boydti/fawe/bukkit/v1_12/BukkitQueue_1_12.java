@@ -240,7 +240,7 @@ public class BukkitQueue_1_12 extends BukkitQueue_0<net.minecraft.server.v1_12_R
 
                     ReflectionUtils.setFailsafeFieldValue(fieldChunkGenerator, this.nmsWorld.getChunkProviderServer(), generator);
 
-                    keepLoaded.remove(MathMan.pairInt(x, z));
+                    keepLoaded.remove(keepLoadedKey(x, z));
                     result = getWorld().regenerateChunk(x, z);
                     net.minecraft.server.v1_12_R1.Chunk nmsChunk = getCachedChunk(world, x, z);
                     if (nmsChunk != null) {

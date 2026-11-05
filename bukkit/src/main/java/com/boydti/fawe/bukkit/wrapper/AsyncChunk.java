@@ -87,7 +87,7 @@ public class AsyncChunk implements Chunk {
         if (queue instanceof BukkitQueue_0) {
             BukkitQueue_0 bq = (BukkitQueue_0) queue;
             if (world.isChunkLoaded(x, z)) {
-                long pair = MathMan.pairInt(x, z);
+                long pair = BukkitQueue_0.keepLoadedKey(x, z);
                 Long originalKeep = bq.keepLoaded.get(pair);
                 bq.keepLoaded.put(pair, Long.MAX_VALUE);
                 if (world.isChunkLoaded(x, z)) {
