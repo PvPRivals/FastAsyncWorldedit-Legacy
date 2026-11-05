@@ -807,6 +807,9 @@ public class BukkitQueue18R3 extends BukkitQueue_0<net.minecraft.server.v1_8_R3.
             if (!engine.relightChunk(nmsWorld, center)) {
                 return false;
             }
+            // Mark the chunk lit, as the server's own relight does. Otherwise the server relights it once more on the
+            // main thread the first time a player is near it, and saves it unlit so every later load relights it again.
+            center.e(true);
             saveChunk(center);
             return true;
         } catch (Throwable throwable) {
